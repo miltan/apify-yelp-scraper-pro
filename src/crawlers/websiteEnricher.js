@@ -5,12 +5,9 @@ import { extractContactInfo } from '../extractors/contactExtractor.js';
 import { CONSTANTS } from '../constants.js';
 
 export async function createWebsiteEnricher({ input, proxyConfiguration, businesses }) {
-    const dataset = await Actor.openDataset();
-    const keyValueStore = await Actor.openKeyValueStore();
-    
     // Store enriched data
     const enrichedData = new Map();
-    businesses.forEach(b => enrichedData.set(b.yelpUrl, b));
+    businesses.forEach(b => enrichedData.set(b.yelpUrl, { ...b }));
 
     const crawler = new CheerioCrawler({
         proxyConfiguration,
@@ -47,27 +44,38 @@ export async function createWebsiteEnricher({ input, proxyConfiguration, busines
                         
                         const contactUrl = `${baseUrl}${path}`;
                         
-                        // Check if page exists before queueing
-                        try {
-                            const response = await gotScraping.head(contactUrl, {
-                                timeout: { request: 5000 },
-                                throwHttpErrors: false,
-                                proxyUrl: proxyConfiguration?.newUrl(),
-                            });
+                        // Check if page exists before queueing (only if we have proxy)
+                        if (proxyConfiguration) {
+                            try {
+                                const response = await gotScraping.head(contactUrl, {
+                                    timeout: { request: 5000 },
+                                    throwHttpErrors: false,
+                                    proxyUrl: proxyConfiguration.newUrl(),
+                                });
 
-                            if (response.statusCode === 200) {
-                                await crawler.addRequests([{
-                                    url: contactUrl,
-                                    userData: { 
-                                        businessData,
-                                        isHomepage: false,
-                                    },
-                                }]);
-                                log.debug(`Added contact page: ${contactUrl}`);
+                                if (response.statusCode === 200) {
+                                    await crawler.addRequests([{
+                                        url: contactUrl,
+                                        userData: { 
+                                            businessData,
+                                            isHomepage: false,
+                                        },
+                                    }]);
+                                    log.debug(`Added contact page: ${contactUrl}`);
+                                }
+                            } catch (error) {
+                                // Path doesn't exist, skip it
+                                log.debug(`Contact page not found: ${contactUrl}`);
                             }
-                        } catch (error) {
-                            // Path doesn't exist, skip it
-                            log.debug(`Contact page not found: ${contactUrl}`);
+                        } else {
+                            // Without proxy, just add the request and let it fail if needed
+                            await crawler.addRequests([{
+                                url: contactUrl,
+                                userData: { 
+                                    businessData,
+                                    isHomepage: false,
+                                },
+                            }]);
                         }
                     }
                 }
@@ -97,21 +105,21 @@ export async function createWebsiteEnricher({ input, proxyConfiguration, busines
     // After crawler finishes, save enriched data back to dataset
     log.info('Saving enriched data to dataset...');
     
-    // Clear the dataset and save enriched data
+    // Clear the existing dataset and push enriched data
+    const dataset = await Actor.openDataset();
+    
+    // Get all enriched businesses
     const finalData = Array.from(enrichedData.values());
     
-    // We need to replace the dataset with enriched data
-    // First, get the dataset info
-    const datasetInfo = await dataset.getInfo();
+    // Clear existing items
+    const currentData = await dataset.getData();
     
-    // Clear existing data
+    // Drop the current dataset
     await dataset.drop();
     
-    // Create new dataset with same name
-    await Actor.openDataset(datasetInfo.name);
-    
-    // Push enriched data
-    await dataset.pushData(finalData);
+    // Open a new dataset and push enriched data
+    const newDataset = await Actor.openDataset();
+    await newDataset.pushData(finalData);
     
     log.info(`Enrichment complete. Updated ${finalData.length} businesses`);
 }

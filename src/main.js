@@ -20,18 +20,33 @@ try {
 
     log.info(`Starting crawl from: ${searchUrl}`);
 
-    // Create proxy configuration
+    // Create proxy configuration if enabled
     let proxyConfiguration = null;
-    if (validatedInput.useResidentialProxy) {
-        proxyConfiguration = await Actor.createProxyConfiguration({
-            groups: ['RESIDENTIAL'],
-            countryCode: validatedInput.proxyCountryCode,
-        });
+    
+    // Only create proxy configuration if user explicitly wants to use proxy
+    if (validatedInput.useProxy === true) {
+        try {
+            if (validatedInput.useResidentialProxy) {
+                log.info('Creating residential proxy configuration...');
+                proxyConfiguration = await Actor.createProxyConfiguration({
+                    groups: ['RESIDENTIAL'],
+                    countryCode: validatedInput.proxyCountryCode,
+                });
+            } else {
+                log.info('Creating datacenter proxy configuration...');
+                // Use AUTO group for basic datacenter proxies
+                proxyConfiguration = await Actor.createProxyConfiguration({
+                    groups: ['AUTO'],
+                    countryCode: validatedInput.proxyCountryCode,
+                });
+            }
+            log.info('Proxy configuration created successfully');
+        } catch (error) {
+            log.warning(`Failed to create proxy configuration: ${error.message}. Continuing without proxy.`);
+            proxyConfiguration = null;
+        }
     } else {
-        proxyConfiguration = await Actor.createProxyConfiguration({
-            groups: ['SHADER'],
-            countryCode: validatedInput.proxyCountryCode,
-        });
+        log.info('Running without proxy configuration');
     }
 
     // Phase 1: Crawl Yelp

@@ -48,12 +48,18 @@
       "default": ["/contact", "/about", "/contact-us", "/about-us"],
       "prefill": ["/contact", "/about", "/contact-us", "/about-us"]
     },
+    "useProxy": {
+      "title": "Use Proxy",
+      "type": "boolean",
+      "description": "Enable proxy usage (requires proxy access on your Apify account)",
+      "default": false,
+      "sectionCaption": "Proxy & Performance Settings"
+    },
     "useResidentialProxy": {
       "title": "Use Residential Proxy",
       "type": "boolean",
-      "description": "Use Apify residential proxies for better success rates",
-      "default": false,
-      "sectionCaption": "Proxy & Performance Settings"
+      "description": "Use Apify residential proxies instead of datacenter (requires RESIDENTIAL proxy access)",
+      "default": false
     },
     "proxyCountryCode": {
       "title": "Proxy Country Code",

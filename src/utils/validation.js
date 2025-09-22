@@ -6,6 +6,7 @@ export function validateInput(input) {
     validated.maxConcurrency = validated.maxConcurrency || 3;
     validated.fetchContactsFromWebsite = validated.fetchContactsFromWebsite !== false;
     validated.contactPagePaths = validated.contactPagePaths || ['/contact', '/about', '/contact-us', '/about-us'];
+    validated.useProxy = validated.useProxy || false;
     validated.useResidentialProxy = validated.useResidentialProxy || false;
     validated.proxyCountryCode = validated.proxyCountryCode || 'US';
     validated.debugScreenshots = validated.debugScreenshots || false;
@@ -22,6 +23,11 @@ export function validateInput(input) {
         validated.maxConcurrency = 1;
     } else if (validated.maxConcurrency > 10) {
         validated.maxConcurrency = 10;
+    }
+
+    // If useProxy is false, ensure useResidentialProxy is also false
+    if (!validated.useProxy) {
+        validated.useResidentialProxy = false;
     }
 
     return validated;
