@@ -38,38 +38,7 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
             },
             // Set user agent at browser context level
             userAgent: userAgent,
-            viewport: { width: 1920, height: 1080 },
-            locale: 'en-US',
-            // Add browser context options for better stealth
-            contextOptions: {
-                ignoreHTTPSErrors: true,
-                javaScriptEnabled: true,
-                bypassCSP: true,
-                userAgent: userAgent,
-                viewport: { width: 1920, height: 1080 },
-                deviceScaleFactor: 1,
-                isMobile: false,
-                hasTouch: false,
-                permissions: ['geolocation'],
-                geolocation: { latitude: 40.7128, longitude: -74.0060 }, // NYC coordinates
-                locale: 'en-US',
-                timezoneId: 'America/New_York',
-                extraHTTPHeaders: {
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache',
-                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                    'Sec-Ch-Ua-Mobile': '?0',
-                    'Sec-Ch-Ua-Platform': '"Windows"',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'none',
-                    'Sec-Fetch-User': '?1',
-                    'Upgrade-Insecure-Requests': '1',
-                },
-            },
+            // Remove viewport from here - it goes in browserContextOptions
         },
 
         browserPoolOptions: {
@@ -80,6 +49,36 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                     devices: ['desktop'],
                     operatingSystems: ['windows', 'macos'],
                 },
+            },
+        },
+
+        browserContextOptions: {
+            viewport: { width: 1920, height: 1080 },
+            locale: 'en-US',
+            userAgent: userAgent,
+            ignoreHTTPSErrors: true,
+            javaScriptEnabled: true,
+            bypassCSP: true,
+            deviceScaleFactor: 1,
+            isMobile: false,
+            hasTouch: false,
+            permissions: ['geolocation'],
+            geolocation: { latitude: 40.7128, longitude: -74.0060 }, // NYC coordinates
+            timezoneId: 'America/New_York',
+            extraHTTPHeaders: {
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
             },
         },
 
@@ -161,9 +160,6 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                     });
                 });
                 
-                // Set viewport
-                await page.setViewportSize({ width: 1920, height: 1080 });
-                
                 // Add random delay before navigation
                 await page.waitForTimeout(Math.random() * 2000 + 1000);
                 
@@ -193,7 +189,8 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
             const { url, userData } = request;
             
             // Check if we got blocked
-            if (response && response.status() === 403) {
+            const statusCode = response?.status();
+            if (statusCode === 403) {
                 log.error(`Blocked with 403 at ${url}`);
                 
                 // Try to detect and handle captcha
@@ -237,13 +234,14 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         'div[class*="searchResult"]',
                         'div[class*="businessListingContainer"]',
                         'section[aria-label*="search results"]',
+                        'h3 a[href*="/biz/"]', // Direct business link selector
                     ];
                     
-                    let businessCardsSelector = null;
+                    let businessCardsFound = false;
                     for (const selector of selectors) {
                         try {
                             await page.waitForSelector(selector, { timeout: 5000 });
-                            businessCardsSelector = selector;
+                            businessCardsFound = true;
                             log.debug(`Found business cards with selector: ${selector}`);
                             break;
                         } catch (e) {
@@ -251,7 +249,7 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         }
                     }
                     
-                    if (!businessCardsSelector) {
+                    if (!businessCardsFound) {
                         log.error('Could not find business cards on page');
                         if (input.debugScreenshots) {
                             await saveScreenshot(page, `no-cards-${Date.now()}.png`);
@@ -284,7 +282,7 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                             'h3 a[href^="/biz/"]',
                             'a[href^="/biz/"] h3',
                             'a[href*="/biz/"]',
-                            '[data-testid*="serp-ia-card"] a',
+                            '[data-testid*="serp-ia-card"] a[href*="/biz/"]',
                         ];
                         
                         for (const selector of linkSelectors) {
@@ -344,7 +342,7 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         const nextSelectors = [
                             'a[aria-label="Next"]',
                             'a.next-link',
-                            '[class*="pagination"] a:has-text("Next")',
+                            '[class*="pagination"] a[aria-label="Next"]',
                             'a[class*="next"]',
                         ];
                         
@@ -400,15 +398,6 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
 
         failedRequestHandler: async ({ request }, error) => {
             log.error(`Request ${request.url} failed after ${request.retryCount} retries: ${error.message}`);
-        },
-
-        // Override the default blocked request behavior
-        handleRequestFunction: async ({ request, response }) => {
-            if (response && response.status() === 403) {
-                log.warning(`Got 403 for ${request.url}, will retry with different strategy`);
-                return false; // Don't throw, let it retry
-            }
-            return true;
         },
     };
 
