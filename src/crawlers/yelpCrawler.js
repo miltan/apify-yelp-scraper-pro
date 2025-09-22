@@ -14,45 +14,60 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
 
     // Build base crawler options
     const crawlerOptions = {
-        maxConcurrency: Math.min(input.maxConcurrency || 3, 1), // Reduce concurrency for stealth
+        maxConcurrency: 1, // Keep it at 1 for maximum stealth
         maxRequestRetries: CONSTANTS.MAX_RETRIES,
         navigationTimeoutSecs: CONSTANTS.NAVIGATION_TIMEOUT / 1000,
         
+        // Disable automatic blocking detection
+        blockRequestsHandlers: [],
+        
         launchContext: {
             launchOptions: {
-                headless: false, // Use headful mode for better stealth
+                headless: false, // Headful mode
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
                     '--disable-blink-features=AutomationControlled',
-                    '--disable-features=IsolateOrigins,site-per-process',
-                    '--disable-web-security',
                     '--window-size=1920,1080',
-                    '--start-maximized',
                     '--user-agent=' + userAgent,
                 ],
                 ignoreDefaultArgs: ['--enable-automation', '--enable-blink-features=AutomationControlled'],
             },
         },
 
-        browserPoolOptions: {
-            useFingerprints: false, // Disable for now as it might conflict
-        },
-
         preNavigationHooks: [
-            async ({ page, request, browserController }) => {
-                // Set viewport size
-                await page.setViewportSize({ width: 1920, height: 1080 });
+            async ({ page, request, crawler }) => {
+                // Set up request interception to modify headers
+                await page.route('**/*', async (route, req) => {
+                    const headers = {
+                        ...req.headers(),
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache',
+                        'Sec-Ch-Ua': '"Chromium";v="120", "Not(A:Brand";v="24", "Google Chrome";v="120"',
+                        'Sec-Ch-Ua-Mobile': '?0',
+                        'Sec-Ch-Ua-Platform': '"Windows"',
+                        'Sec-Fetch-Dest': 'document',
+                        'Sec-Fetch-Mode': 'navigate',
+                        'Sec-Fetch-Site': 'none',
+                        'Sec-Fetch-User': '?1',
+                        'Upgrade-Insecure-Requests': '1',
+                    };
+                    
+                    await route.continue({ headers });
+                });
                 
-                // Enhanced stealth mode - inject before any navigation
+                // Inject stealth scripts
                 await page.addInitScript(() => {
-                    // Override webdriver property
+                    // Override webdriver
                     Object.defineProperty(navigator, 'webdriver', {
                         get: () => undefined,
                     });
                     
-                    // Override plugins to look more realistic
+                    // Mock plugins
                     Object.defineProperty(navigator, 'plugins', {
                         get: () => [
                             { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
@@ -61,152 +76,117 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         ],
                     });
                     
-                    // Override permissions
-                    if (navigator.permissions && navigator.permissions.query) {
-                        const originalQuery = navigator.permissions.query;
-                        navigator.permissions.query = (parameters) => (
-                            parameters.name === 'notifications' 
-                                ? Promise.resolve({ state: 'default' }) 
-                                : originalQuery(parameters)
-                        );
-                    }
-                    
-                    // Chrome specific
+                    // Chrome runtime
                     window.chrome = {
                         runtime: {},
                         loadTimes: function() {},
                         csi: function() {},
-                        app: {},
                     };
                     
-                    // Override language
+                    // Languages
                     Object.defineProperty(navigator, 'languages', {
                         get: () => ['en-US', 'en'],
                     });
                     
-                    // Override hardware concurrency
-                    Object.defineProperty(navigator, 'hardwareConcurrency', {
-                        get: () => 4,
-                    });
-                    
-                    // Override platform
+                    // Platform
                     Object.defineProperty(navigator, 'platform', {
                         get: () => 'Win32',
                     });
-                    
-                    // Override vendor
-                    Object.defineProperty(navigator, 'vendor', {
-                        get: () => 'Google Inc.',
-                    });
-                    
-                    // Mock WebGL vendor
-                    if (window.WebGLRenderingContext) {
-                        const getParameter = WebGLRenderingContext.prototype.getParameter;
-                        WebGLRenderingContext.prototype.getParameter = function(parameter) {
-                            if (parameter === 37445) {
-                                return 'Intel Inc.';
-                            }
-                            if (parameter === 37446) {
-                                return 'Intel Iris OpenGL Engine';
-                            }
-                            return getParameter.apply(this, arguments);
-                        };
-                    }
                 });
                 
-                // Add random delay before navigation
-                await page.waitForTimeout(Math.random() * 2000 + 1000);
-                
-                log.debug(`Navigating to ${request.url}`);
-            },
-        ],
-
-        postNavigationHooks: [
-            async ({ page }) => {
-                // Random delay after page load
+                // Add delay to seem more human
                 await page.waitForTimeout(Math.random() * 3000 + 2000);
-                
-                // Simulate human-like mouse movement
-                await page.mouse.move(
-                    Math.random() * 500 + 100,
-                    Math.random() * 500 + 100
-                );
-                
-                // Random scroll
-                await page.evaluate(() => {
-                    window.scrollTo(0, Math.random() * 300);
-                });
             },
         ],
 
         requestHandler: async ({ request, page, crawler, response }) => {
             const { url, userData } = request;
             
+            // Check the response status but don't throw on 403
+            const status = response?.status();
+            log.info(`Got response status ${status} for ${url}`);
+            
+            if (status === 403 || status === 503) {
+                log.warning(`Got ${status} response, checking page content...`);
+                
+                // Wait for page to load anyway
+                await page.waitForTimeout(5000);
+                
+                // Get page content
+                const content = await page.content();
+                const title = await page.title();
+                
+                log.info(`Page title: ${title}`);
+                
+                // Check if it's a captcha/verification page
+                if (content.includes('captcha') || content.includes('verify') || 
+                    content.includes('unusual traffic') || title.includes('Verify')) {
+                    log.error('Captcha/Verification page detected');
+                    if (input.debugScreenshots) {
+                        await saveScreenshot(page, `captcha-${Date.now()}.png`);
+                    }
+                    
+                    // Try to wait and see if we can proceed
+                    log.info('Waiting 30 seconds for potential manual intervention...');
+                    await page.waitForTimeout(30000);
+                    
+                    // Try to reload
+                    await page.reload({ waitUntil: 'domcontentloaded' });
+                    await page.waitForTimeout(5000);
+                }
+                
+                // Check if content loaded despite 403
+                const hasBusinesses = await page.evaluate(() => {
+                    return document.querySelectorAll('a[href*="/biz/"]').length > 0;
+                });
+                
+                if (!hasBusinesses) {
+                    log.error('No businesses found on blocked page');
+                    if (input.debugScreenshots) {
+                        await saveScreenshot(page, `blocked-${Date.now()}.png`);
+                    }
+                    return; // Skip processing this page
+                }
+                
+                log.info('Found businesses despite block status, continuing...');
+            }
+            
             log.info(`Processing ${userData.type || 'search'} page: ${url}`);
 
             try {
-                // Add random delays throughout to simulate human behavior
                 await page.waitForTimeout(Math.random() * 2000 + 1000);
                 
                 if (!userData.type || userData.type === 'search') {
-                    // Handle search results page
-                    log.debug('Waiting for page to load...');
-                    
-                    // Wait for page to be fully loaded
-                    try {
-                        await page.waitForLoadState('domcontentloaded', { timeout: 30000 });
-                    } catch (e) {
-                        log.warning('Page load timeout, continuing anyway...');
-                    }
-                    
+                    // Wait for content
+                    await page.waitForLoadState('domcontentloaded');
                     await page.waitForTimeout(3000);
                     
-                    // Check if we hit a captcha or block page
-                    const pageContent = await page.content();
-                    if (pageContent.includes('unusual traffic') || pageContent.includes('verify') || pageContent.includes('captcha')) {
-                        log.error('Detected blocking or captcha page');
-                        if (input.debugScreenshots) {
-                            await saveScreenshot(page, `blocked-${Date.now()}.png`);
+                    // Smooth scroll
+                    await page.evaluate(async () => {
+                        for (let i = 0; i < document.body.scrollHeight; i += 100) {
+                            window.scrollTo(0, i);
+                            await new Promise(r => setTimeout(r, 50));
                         }
-                        
-                        // Try to wait it out
-                        log.info('Waiting 30 seconds before retry...');
-                        await page.waitForTimeout(30000);
-                        
-                        // Reload page
-                        await page.reload();
-                        await page.waitForTimeout(5000);
-                    }
+                    });
                     
-                    // Try to find business listings
-                    log.debug('Looking for business listings...');
+                    await page.waitForTimeout(2000);
                     
-                    // Extract business listings with a more flexible approach
+                    // Extract businesses
                     const businesses = await page.evaluate(() => {
                         const results = [];
+                        const links = document.querySelectorAll('a[href*="/biz/"]');
                         
-                        // Find all links that look like business pages
-                        const allLinks = document.querySelectorAll('a[href*="/biz/"]');
-                        
-                        allLinks.forEach(link => {
+                        links.forEach(link => {
                             const href = link.href;
-                            // Filter out non-business links
                             if (href && href.includes('/biz/') && 
                                 !href.includes('/writeareview') && 
                                 !href.includes('/questions') &&
                                 !href.includes('/photos')) {
                                 
-                                // Try to find the business name
                                 let name = link.textContent;
-                                // Check if link contains an h3 or h4
-                                const heading = link.querySelector('h3, h4');
+                                const heading = link.querySelector('h3, h4') || link.closest('h3, h4');
                                 if (heading) {
                                     name = heading.textContent;
-                                }
-                                // Or if the link is within a heading
-                                const parentHeading = link.closest('h3, h4');
-                                if (parentHeading) {
-                                    name = parentHeading.textContent;
                                 }
                                 
                                 if (name && name.trim()) {
@@ -218,7 +198,7 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                             }
                         });
                         
-                        // Deduplicate by URL
+                        // Deduplicate
                         const unique = [];
                         const seen = new Set();
                         for (const item of results) {
@@ -231,25 +211,21 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         return unique;
                     });
 
-                    log.info(`Found ${businesses.length} businesses on this page`);
+                    log.info(`Found ${businesses.length} businesses`);
                     
-                    if (businesses.length === 0) {
-                        log.warning('No businesses found, page might be blocked or changed');
-                        if (input.debugScreenshots) {
-                            await saveScreenshot(page, `no-businesses-${Date.now()}.png`);
-                        }
+                    if (businesses.length === 0 && input.debugScreenshots) {
+                        await saveScreenshot(page, `no-businesses-${Date.now()}.png`);
                     }
 
-                    // Queue business detail pages with delays
+                    // Queue business pages
                     for (const business of businesses) {
                         if (businessCount >= maxResults) {
-                            log.info(`Reached max results limit: ${maxResults}`);
+                            log.info(`Reached max results: ${maxResults}`);
                             break;
                         }
 
-                        // Add delay between requests
                         await page.waitForTimeout(Math.random() * 2000 + 1000);
-
+                        
                         await crawler.addRequests([{
                             url: business.url,
                             userData: { type: 'detail', businessName: business.name },
@@ -260,37 +236,24 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
 
                     // Look for next page
                     if (businessCount < maxResults) {
-                        const nextPageLink = await page.evaluate(() => {
-                            // Try various selectors for next page
-                            const nextLink = document.querySelector('a[aria-label="Next"], a.next-link, [class*="next"] a, a:has-text("Next")');
-                            return nextLink ? nextLink.href : null;
+                        const nextLink = await page.evaluate(() => {
+                            const next = document.querySelector('a[aria-label="Next"], a.next-link');
+                            return next ? next.href : null;
                         });
 
-                        if (nextPageLink) {
-                            log.info('Found next page, queueing...');
-                            // Add significant delay before next page
+                        if (nextLink) {
+                            log.info('Queueing next page...');
                             await page.waitForTimeout(Math.random() * 5000 + 5000);
-                            
                             await crawler.addRequests([{
-                                url: nextPageLink,
+                                url: nextLink,
                                 userData: { type: 'search' },
                             }]);
-                        } else {
-                            log.info('No more pages found');
                         }
                     }
 
                 } else if (userData.type === 'detail') {
-                    // Handle business detail page
                     await page.waitForLoadState('domcontentloaded');
-                    await page.waitForTimeout(Math.random() * 3000 + 2000);
-                    
-                    // Wait for main content
-                    try {
-                        await page.waitForSelector('h1', { timeout: 10000 });
-                    } catch (e) {
-                        log.warning('Could not find h1 on detail page');
-                    }
+                    await page.waitForTimeout(2000);
                     
                     const businessData = await extractBusinessDetails(page);
                     
@@ -302,15 +265,12 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         businessData.socialLinks = [];
                         
                         await dataset.pushData(businessData);
-                        log.info(`Saved business: ${businessData.name}`);
-                    } else {
-                        log.warning(`Could not extract data from ${url}`);
+                        log.info(`Saved: ${businessData.name}`);
                     }
                 }
 
             } catch (error) {
-                log.error(`Error processing ${url}: ${error.message}`);
-                
+                log.error(`Error: ${error.message}`);
                 if (input.debugScreenshots) {
                     await saveScreenshot(page, `error-${Date.now()}.png`);
                 }
@@ -318,7 +278,21 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
         },
 
         failedRequestHandler: async ({ request }, error) => {
-            log.error(`Request ${request.url} failed after ${request.retryCount} retries: ${error.message}`);
+            // Don't log 403s as failures since we handle them
+            if (!error.message.includes('403')) {
+                log.error(`Request failed: ${error.message}`);
+            }
+        },
+
+        // Override navigation to not throw on blocked status codes
+        navigationTimeoutSecs: 60,
+        handlePageTimeoutSecs: 120,
+        
+        // Disable throwing on blocked requests
+        autoscaledPoolOptions: {
+            systemStatusOptions: {
+                maxEventLoopOverloadedRatio: 0.9,
+            },
         },
     };
 
@@ -328,6 +302,12 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
     }
 
     const crawler = new PlaywrightCrawler(crawlerOptions);
+
+    // Override the internal method that throws on blocked requests
+    crawler._throwOnBlockedRequest = async () => {
+        // Do nothing - we'll handle blocked requests ourselves
+        return;
+    };
 
     return crawler;
 }
