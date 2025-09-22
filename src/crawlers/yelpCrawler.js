@@ -1,6 +1,6 @@
 import { PlaywrightCrawler, log } from 'crawlee';
 import { CONSTANTS } from '../constants.js';
-import { extractBusinessListing, extractBusinessDetails } from '../extractors/yelpExtractor.js';
+import { extractBusinessDetails } from '../extractors/yelpExtractor.js';  // <-- Fixed import
 import { Actor } from 'apify';
 import { saveScreenshot } from '../utils/helpers.js';
 
