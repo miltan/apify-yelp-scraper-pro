@@ -1,0 +1,84 @@
+{
+  "title": "Yelp Business Scraper Input",
+  "description": "Configure your Yelp search and enrichment options",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "search": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Business type or name to search (e.g., 'plumber', 'restaurant'). Used if Yelp Search URL is empty.",
+      "editor": "textfield",
+      "prefill": "restaurant"
+    },
+    "location": {
+      "title": "Location",
+      "type": "string",
+      "description": "City, state, or address for the search (e.g., 'New York, NY'). Used with Search Query.",
+      "editor": "textfield",
+      "prefill": "New York, NY"
+    },
+    "yelpSearchUrl": {
+      "title": "Yelp Search URL",
+      "type": "string",
+      "description": "Optional: Provide a full Yelp search URL. This overrides Search Query and Location.",
+      "editor": "textfield",
+      "pattern": "^(https?://www\\.yelp\\.com/search\\?.*)?$"
+    },
+    "maxResults": {
+      "title": "Max Results",
+      "type": "integer",
+      "description": "Maximum number of businesses to scrape",
+      "default": 50,
+      "minimum": 1,
+      "maximum": 1000
+    },
+    "fetchContactsFromWebsite": {
+      "title": "Fetch Contacts from Website",
+      "type": "boolean",
+      "description": "Visit each business website to extract emails, phones, and social media links",
+      "default": true,
+      "sectionCaption": "Website Enrichment Options"
+    },
+    "contactPagePaths": {
+      "title": "Contact Page Paths",
+      "type": "array",
+      "description": "Additional paths to check on business websites (one per line)",
+      "editor": "stringList",
+      "default": ["/contact", "/about", "/contact-us", "/about-us"],
+      "prefill": ["/contact", "/about", "/contact-us", "/about-us"]
+    },
+    "useResidentialProxy": {
+      "title": "Use Residential Proxy",
+      "type": "boolean",
+      "description": "Use Apify residential proxies for better success rates",
+      "default": false,
+      "sectionCaption": "Proxy & Performance Settings"
+    },
+    "proxyCountryCode": {
+      "title": "Proxy Country Code",
+      "type": "string",
+      "description": "Country code for proxy (e.g., 'US', 'CA')",
+      "editor": "select",
+      "enum": ["US", "CA", "GB", "AU", "DE", "FR"],
+      "enumTitles": ["United States", "Canada", "United Kingdom", "Australia", "Germany", "France"],
+      "default": "US"
+    },
+    "maxConcurrency": {
+      "title": "Max Concurrency",
+      "type": "integer",
+      "description": "Number of parallel browser sessions",
+      "default": 3,
+      "minimum": 1,
+      "maximum": 10
+    },
+    "debugScreenshots": {
+      "title": "Debug Screenshots",
+      "type": "boolean",
+      "description": "Capture screenshots on failures for debugging",
+      "default": false,
+      "groupCaption": "Debug Options"
+    }
+  },
+  "required": []
+}

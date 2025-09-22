@@ -1,0 +1,8 @@
+{
+    "name": "yelp-business-scraper",
+    "version": "1.0.0",
+    "template": "playwright",
+    "env": {
+        "npm_config_loglevel": "silent"
+    }
+}

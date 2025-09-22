@@ -1,0 +1,13 @@
+{
+  "actorSpecification": 1,
+  "name": "yelp-business-scraper",
+  "title": "Yelp Business Scraper with Website Enrichment",
+  "description": "Scrapes Yelp business listings and enriches data with contact information from business websites",
+  "version": "1.0.0",
+  "meta": {
+    "templateId": "playwright"
+  },
+  "input": "./INPUT_SCHEMA.json",
+  "dockerfile": "./Dockerfile",
+  "readme": "./README.md"
+}
