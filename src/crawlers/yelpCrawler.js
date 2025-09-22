@@ -14,56 +14,219 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
 
     // Build base crawler options
     const crawlerOptions = {
-        maxConcurrency: input.maxConcurrency || 3,
+        maxConcurrency: Math.min(input.maxConcurrency || 3, 1), // Reduce concurrency for stealth
         maxRequestRetries: CONSTANTS.MAX_RETRIES,
         navigationTimeoutSecs: CONSTANTS.NAVIGATION_TIMEOUT / 1000,
         
         launchContext: {
             launchOptions: {
-                headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+                headless: false, // Use headful mode for better stealth
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-blink-features=AutomationControlled',
+                    '--disable-features=IsolateOrigins,site-per-process',
+                    '--disable-site-isolation-trials',
+                    '--disable-web-security',
+                    '--disable-features=BlockInsecurePrivateNetworkRequests',
+                    '--disable-features=OutOfBlinkCors',
+                    '--window-size=1920,1080',
+                    '--start-maximized',
+                ],
+                ignoreDefaultArgs: ['--enable-automation'],
             },
             // Set user agent at browser context level
             userAgent: userAgent,
+            viewport: { width: 1920, height: 1080 },
+            locale: 'en-US',
+            // Add browser context options for better stealth
+            contextOptions: {
+                ignoreHTTPSErrors: true,
+                javaScriptEnabled: true,
+                bypassCSP: true,
+                userAgent: userAgent,
+                viewport: { width: 1920, height: 1080 },
+                deviceScaleFactor: 1,
+                isMobile: false,
+                hasTouch: false,
+                permissions: ['geolocation'],
+                geolocation: { latitude: 40.7128, longitude: -74.0060 }, // NYC coordinates
+                locale: 'en-US',
+                timezoneId: 'America/New_York',
+                extraHTTPHeaders: {
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Cache-Control': 'no-cache',
+                    'Pragma': 'no-cache',
+                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Upgrade-Insecure-Requests': '1',
+                },
+            },
         },
 
         browserPoolOptions: {
-            useFingerprints: false, // Disable fingerprinting if not needed
+            useFingerprints: true, // Enable fingerprinting
+            fingerprintOptions: {
+                fingerprintGeneratorOptions: {
+                    browsers: ['chrome'],
+                    devices: ['desktop'],
+                    operatingSystems: ['windows', 'macos'],
+                },
+            },
         },
 
         preNavigationHooks: [
             async ({ page, request }) => {
-                // Set viewport
-                await page.setViewportSize({ width: 1920, height: 1080 });
-                
-                // Add stealth settings
+                // Enhanced stealth mode
                 await page.addInitScript(() => {
+                    // Override webdriver property
                     Object.defineProperty(navigator, 'webdriver', {
-                        get: () => false,
+                        get: () => undefined,
                     });
                     
-                    // Additional stealth
+                    // Override plugins to look more realistic
                     Object.defineProperty(navigator, 'plugins', {
-                        get: () => [1, 2, 3, 4, 5],
+                        get: () => [
+                            { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+                            { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+                            { name: 'Native Client', filename: 'internal-nacl-plugin' },
+                        ],
                     });
                     
+                    // Override permissions
+                    const originalQuery = window.navigator.permissions.query;
+                    window.navigator.permissions.query = (parameters) => (
+                        parameters.name === 'notifications' 
+                            ? Promise.resolve({ state: Notification.permission }) 
+                            : originalQuery(parameters)
+                    );
+                    
+                    // Chrome specific
+                    window.chrome = {
+                        runtime: {},
+                        loadTimes: function() {},
+                        csi: function() {},
+                        app: {},
+                    };
+                    
+                    // Override language
                     Object.defineProperty(navigator, 'languages', {
                         get: () => ['en-US', 'en'],
                     });
+                    
+                    // Override hardware concurrency
+                    Object.defineProperty(navigator, 'hardwareConcurrency', {
+                        get: () => 4,
+                    });
+                    
+                    // Override platform
+                    Object.defineProperty(navigator, 'platform', {
+                        get: () => 'Win32',
+                    });
+                    
+                    // Override vendor
+                    Object.defineProperty(navigator, 'vendor', {
+                        get: () => 'Google Inc.',
+                    });
+                    
+                    // Mock WebGL vendor
+                    const getParameter = WebGLRenderingContext.prototype.getParameter;
+                    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                        if (parameter === 37445) {
+                            return 'Intel Inc.';
+                        }
+                        if (parameter === 37446) {
+                            return 'Intel Iris OpenGL Engine';
+                        }
+                        return getParameter.apply(this, arguments);
+                    };
+                    
+                    // Hide automation indicators
+                    ['webdriver', '__driver_evaluate', '__webdriver_evaluate', '__selenium_evaluate', 
+                     '__fxdriver_evaluate', '__driver_unwrapped', '__webdriver_unwrapped', 
+                     '__selenium_unwrapped', '__fxdriver_unwrapped', '__webdriver_script_function',
+                     '__webdriver_script_func', '__webdriver_script_fn', '__fxdriver_script_fn',
+                     '__selenium_script_fn', '__webdriver_evaluate_response', '__selenium_evaluate_response',
+                     '__webdriver_script_response', '__selenium_script_response'].forEach(prop => {
+                        delete window[prop];
+                        delete document[prop];
+                    });
                 });
+                
+                // Set viewport
+                await page.setViewportSize({ width: 1920, height: 1080 });
+                
+                // Add random delay before navigation
+                await page.waitForTimeout(Math.random() * 2000 + 1000);
                 
                 log.debug(`Navigating to ${request.url}`);
             },
         ],
 
-        requestHandler: async ({ request, page, crawler }) => {
+        postNavigationHooks: [
+            async ({ page }) => {
+                // Random delay after page load
+                await page.waitForTimeout(Math.random() * 3000 + 2000);
+                
+                // Simulate human-like mouse movement
+                await page.mouse.move(
+                    Math.random() * 1920,
+                    Math.random() * 1080
+                );
+                
+                // Random scroll
+                await page.evaluate(() => {
+                    window.scrollTo(0, Math.random() * 500);
+                });
+            },
+        ],
+
+        requestHandler: async ({ request, page, crawler, response }) => {
             const { url, userData } = request;
+            
+            // Check if we got blocked
+            if (response && response.status() === 403) {
+                log.error(`Blocked with 403 at ${url}`);
+                
+                // Try to detect and handle captcha
+                const hasCaptcha = await page.evaluate(() => {
+                    return document.body.textContent.includes('verify') || 
+                           document.body.textContent.includes('captcha') ||
+                           document.body.textContent.includes('robot');
+                });
+                
+                if (hasCaptcha) {
+                    log.warning('Captcha detected, waiting for manual solve...');
+                    if (input.debugScreenshots) {
+                        await saveScreenshot(page, `captcha-${Date.now()}.png`);
+                    }
+                    // Wait longer with human interaction simulation
+                    await page.waitForTimeout(30000);
+                }
+                
+                return;
+            }
+            
             log.info(`Processing ${userData.type || 'search'} page: ${url}`);
 
             try {
+                // Add random delays throughout to simulate human behavior
+                await page.waitForTimeout(Math.random() * 2000 + 1000);
+                
                 if (!userData.type || userData.type === 'search') {
                     // Handle search results page
                     log.debug('Waiting for business cards to load...');
+                    
+                    // Wait for page to be fully loaded
+                    await page.waitForLoadState('networkidle', { timeout: 30000 });
                     
                     // Try multiple selectors as Yelp might have different layouts
                     const selectors = [
@@ -72,6 +235,8 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         'div[class*="hoverable"]',
                         'ul li div[class*="container"]',
                         'div[class*="searchResult"]',
+                        'div[class*="businessListingContainer"]',
+                        'section[aria-label*="search results"]',
                     ];
                     
                     let businessCardsSelector = null;
@@ -88,19 +253,29 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                     
                     if (!businessCardsSelector) {
                         log.error('Could not find business cards on page');
-                        await saveScreenshot(page, `no-cards-${Date.now()}.png`);
+                        if (input.debugScreenshots) {
+                            await saveScreenshot(page, `no-cards-${Date.now()}.png`);
+                        }
                         return;
                     }
 
-                    // Scroll to load all results
-                    await page.evaluate(() => {
-                        window.scrollTo(0, document.body.scrollHeight);
+                    // Simulate human scrolling behavior
+                    await page.evaluate(async () => {
+                        // Smooth scroll to bottom
+                        const scrollStep = 100;
+                        const scrollDelay = 100;
+                        const bottom = document.body.scrollHeight;
+                        
+                        for (let i = 0; i < bottom; i += scrollStep) {
+                            window.scrollTo(0, i);
+                            await new Promise(resolve => setTimeout(resolve, scrollDelay));
+                        }
                     });
                     
-                    // Wait for potential lazy-loaded content
-                    await page.waitForTimeout(2000);
+                    // Wait for lazy-loaded content
+                    await page.waitForTimeout(3000);
 
-                    // Extract business listings with multiple selector strategies
+                    // Extract business listings
                     const businesses = await page.evaluate(() => {
                         const results = [];
                         
@@ -145,17 +320,16 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                     });
 
                     log.info(`Found ${businesses.length} businesses on this page`);
-                    
-                    if (businesses.length === 0 && input.debugScreenshots) {
-                        await saveScreenshot(page, `no-businesses-${Date.now()}.png`);
-                    }
 
-                    // Queue business detail pages
+                    // Queue business detail pages with delays
                     for (const business of businesses) {
                         if (businessCount >= maxResults) {
                             log.info(`Reached max results limit: ${maxResults}`);
                             break;
                         }
+
+                        // Add delay between requests
+                        await page.waitForTimeout(Math.random() * 3000 + 2000);
 
                         await crawler.addRequests([{
                             url: business.url,
@@ -165,13 +339,11 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         businessCount++;
                     }
 
-                    // Check for next page if we haven't reached max results
+                    // Check for next page
                     if (businessCount < maxResults) {
-                        // Try multiple next button selectors
                         const nextSelectors = [
                             'a[aria-label="Next"]',
                             'a.next-link',
-                            'a:has-text("Next")',
                             '[class*="pagination"] a:has-text("Next")',
                             'a[class*="next"]',
                         ];
@@ -188,44 +360,32 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
 
                         if (nextPageLink) {
                             log.info('Found next page, queueing...');
+                            // Add significant delay before next page
+                            await page.waitForTimeout(Math.random() * 5000 + 5000);
+                            
                             await crawler.addRequests([{
                                 url: nextPageLink,
                                 userData: { type: 'search' },
                             }]);
-                        } else {
-                            log.info('No more pages found');
                         }
                     }
 
                 } else if (userData.type === 'detail') {
                     // Handle business detail page
-                    log.debug('Processing business detail page...');
+                    await page.waitForLoadState('networkidle');
+                    await page.waitForTimeout(Math.random() * 3000 + 2000);
                     
-                    // Wait for main content
-                    try {
-                        await page.waitForSelector('h1', { timeout: CONSTANTS.DEFAULT_TIMEOUT });
-                    } catch (e) {
-                        log.error('Could not find business name on detail page');
-                        return;
-                    }
-
-                    // Extract business details
                     const businessData = await extractBusinessDetails(page);
                     
                     if (businessData) {
                         businessData.yelpUrl = url;
                         businessData.scrapedAt = new Date().toISOString();
-                        
-                        // Initialize empty arrays for enrichment phase
                         businessData.emails = [];
                         businessData.phonesFromWebsite = [];
                         businessData.socialLinks = [];
                         
-                        // Save to dataset
                         await dataset.pushData(businessData);
                         log.info(`Saved business: ${businessData.name}`);
-                    } else {
-                        log.warning(`Could not extract data from ${url}`);
                     }
                 }
 
@@ -235,13 +395,20 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                 if (input.debugScreenshots) {
                     await saveScreenshot(page, `error-${Date.now()}.png`);
                 }
-                
-                // Don't throw - continue with other requests
             }
         },
 
         failedRequestHandler: async ({ request }, error) => {
             log.error(`Request ${request.url} failed after ${request.retryCount} retries: ${error.message}`);
+        },
+
+        // Override the default blocked request behavior
+        handleRequestFunction: async ({ request, response }) => {
+            if (response && response.status() === 403) {
+                log.warning(`Got 403 for ${request.url}, will retry with different strategy`);
+                return false; // Don't throw, let it retry
+            }
+            return true;
         },
     };
 
