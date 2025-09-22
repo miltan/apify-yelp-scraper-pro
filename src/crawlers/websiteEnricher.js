@@ -9,8 +9,8 @@ export async function createWebsiteEnricher({ input, proxyConfiguration, busines
     const enrichedData = new Map();
     businesses.forEach(b => enrichedData.set(b.yelpUrl, { ...b }));
 
-    const crawler = new CheerioCrawler({
-        proxyConfiguration,
+    // Build crawler options conditionally
+    const crawlerOptions = {
         maxConcurrency: Math.min(input.maxConcurrency || 3, 5), // Limit concurrency for website enrichment
         maxRequestRetries: 2,
         requestTimeoutSecs: CONSTANTS.REQUEST_TIMEOUT / 1000,
@@ -89,7 +89,14 @@ export async function createWebsiteEnricher({ input, proxyConfiguration, busines
             log.warning(`Failed to enrich ${request.url}: ${error.message}`);
             // Don't throw - we want to continue with other businesses
         },
-    });
+    };
+
+    // Only add proxyConfiguration if it exists
+    if (proxyConfiguration) {
+        crawlerOptions.proxyConfiguration = proxyConfiguration;
+    }
+
+    const crawler = new CheerioCrawler(crawlerOptions);
 
     // Queue all business websites
     const requests = businesses.map(business => ({

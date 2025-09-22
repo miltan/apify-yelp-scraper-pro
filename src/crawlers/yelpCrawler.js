@@ -9,8 +9,8 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
     let businessCount = 0;
     const maxResults = input.maxResults || 50;
 
-    const crawler = new PlaywrightCrawler({
-        proxyConfiguration,
+    // Build crawler options conditionally
+    const crawlerOptions = {
         maxConcurrency: input.maxConcurrency || 3,
         maxRequestRetries: CONSTANTS.MAX_RETRIES,
         navigationTimeoutSecs: CONSTANTS.NAVIGATION_TIMEOUT / 1000,
@@ -154,7 +154,14 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
         failedRequestHandler: async ({ request, error }) => {
             log.error(`Request ${request.url} failed after ${request.retryCount} retries: ${error.message}`);
         },
-    });
+    };
+
+    // Only add proxyConfiguration if it exists
+    if (proxyConfiguration) {
+        crawlerOptions.proxyConfiguration = proxyConfiguration;
+    }
+
+    const crawler = new PlaywrightCrawler(crawlerOptions);
 
     return crawler;
 }
