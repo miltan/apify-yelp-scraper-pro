@@ -7,10 +7,14 @@ import { CONSTANTS } from '../constants.js';
 export async function createWebsiteEnricher({ input, proxyConfiguration, businesses }) {
     const dataset = await Actor.openDataset();
     const keyValueStore = await Actor.openKeyValueStore();
+    
+    // Store enriched data
+    const enrichedData = new Map();
+    businesses.forEach(b => enrichedData.set(b.yelpUrl, b));
 
-    return new CheerioCrawler({
+    const crawler = new CheerioCrawler({
         proxyConfiguration,
-        maxConcurrency: input.maxConcurrency || 3,
+        maxConcurrency: Math.min(input.maxConcurrency || 3, 5), // Limit concurrency for website enrichment
         maxRequestRetries: 2,
         requestTimeoutSecs: CONSTANTS.REQUEST_TIMEOUT / 1000,
 
@@ -23,24 +27,24 @@ export async function createWebsiteEnricher({ input, proxyConfiguration, busines
                 const html = $.html();
                 const contactInfo = extractContactInfo(html);
 
-                // Merge with existing business data
-                const existingData = await keyValueStore.getValue(businessData.yelpUrl) || businessData;
+                // Get existing enriched data
+                const existing = enrichedData.get(businessData.yelpUrl);
                 
-                const updatedData = {
-                    ...existingData,
-                    emails: [...new Set([...(existingData.emails || []), ...contactInfo.emails])],
-                    phonesFromWebsite: [...new Set([...(existingData.phonesFromWebsite || []), ...contactInfo.phones])],
-                    socialLinks: [...new Set([...(existingData.socialLinks || []), ...contactInfo.socialLinks])],
-                };
-
-                // Save updated data
-                await keyValueStore.setValue(businessData.yelpUrl, updatedData);
+                // Merge contact info
+                if (existing) {
+                    existing.emails = [...new Set([...(existing.emails || []), ...contactInfo.emails])];
+                    existing.phonesFromWebsite = [...new Set([...(existing.phonesFromWebsite || []), ...contactInfo.phones])];
+                    existing.socialLinks = [...new Set([...(existing.socialLinks || []), ...contactInfo.socialLinks])];
+                }
 
                 // If this is the homepage and we have contact paths, crawl them too
                 if (request.userData.isHomepage && input.contactPagePaths && input.contactPagePaths.length > 0) {
                     const baseUrl = new URL(request.url).origin;
                     
                     for (const path of input.contactPagePaths) {
+                        // Skip root path if it's the homepage
+                        if (path === '/') continue;
+                        
                         const contactUrl = `${baseUrl}${path}`;
                         
                         // Check if page exists before queueing
@@ -59,6 +63,7 @@ export async function createWebsiteEnricher({ input, proxyConfiguration, busines
                                         isHomepage: false,
                                     },
                                 }]);
+                                log.debug(`Added contact page: ${contactUrl}`);
                             }
                         } catch (error) {
                             // Path doesn't exist, skip it
@@ -87,19 +92,26 @@ export async function createWebsiteEnricher({ input, proxyConfiguration, busines
         },
     }));
 
-    await crawler.addRequests(requests);
+    await crawler.run(requests);
 
-    // After crawler finishes, update the main dataset
-    crawler.autoscaledPool?.addEventListener('persistState', async () => {
-        const enrichedBusinesses = [];
-        
-        for (const business of businesses) {
-            const enrichedData = await keyValueStore.getValue(business.yelpUrl) || business;
-            enrichedBusinesses.push(enrichedData);
-        }
-
-        // Clear and re-push all data to maintain order
-        await dataset.drop();
-        await dataset.pushData(enrichedBusinesses);
-    });
+    // After crawler finishes, save enriched data back to dataset
+    log.info('Saving enriched data to dataset...');
+    
+    // Clear the dataset and save enriched data
+    const finalData = Array.from(enrichedData.values());
+    
+    // We need to replace the dataset with enriched data
+    // First, get the dataset info
+    const datasetInfo = await dataset.getInfo();
+    
+    // Clear existing data
+    await dataset.drop();
+    
+    // Create new dataset with same name
+    await Actor.openDataset(datasetInfo.name);
+    
+    // Push enriched data
+    await dataset.pushData(finalData);
+    
+    log.info(`Enrichment complete. Updated ${finalData.length} businesses`);
 }

@@ -42,7 +42,8 @@ try {
         startUrl: searchUrl,
     });
 
-    await yelpCrawler.run();
+    // Add the initial request
+    await yelpCrawler.run([searchUrl]);
 
     // Phase 2: Enrich with website data (if enabled)
     if (validatedInput.fetchContactsFromWebsite) {
@@ -56,13 +57,11 @@ try {
         if (businessesWithWebsites.length > 0) {
             log.info(`Found ${businessesWithWebsites.length} businesses with websites to enrich`);
             
-            const enricher = await createWebsiteEnricher({
+            await createWebsiteEnricher({
                 input: validatedInput,
                 proxyConfiguration,
                 businesses: businessesWithWebsites,
             });
-
-            await enricher.run();
         } else {
             log.warning('No businesses with websites found for enrichment');
         }
@@ -86,6 +85,6 @@ try {
 } catch (error) {
     log.error('Actor failed with error:', error);
     throw error;
-} finally {
-    await Actor.exit();
 }
+
+await Actor.exit();

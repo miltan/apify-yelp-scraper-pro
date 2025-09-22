@@ -1,6 +1,6 @@
 import { PlaywrightCrawler, log } from 'crawlee';
 import { CONSTANTS } from '../constants.js';
-import { extractBusinessDetails } from '../extractors/yelpExtractor.js';  // <-- Fixed import
+import { extractBusinessDetails } from '../extractors/yelpExtractor.js';
 import { Actor } from 'apify';
 import { saveScreenshot } from '../utils/helpers.js';
 
@@ -9,7 +9,7 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
     let businessCount = 0;
     const maxResults = input.maxResults || 50;
 
-    return new PlaywrightCrawler({
+    const crawler = new PlaywrightCrawler({
         proxyConfiguration,
         maxConcurrency: input.maxConcurrency || 3,
         maxRequestRetries: CONSTANTS.MAX_RETRIES,
@@ -49,15 +49,24 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         timeout: CONSTANTS.DEFAULT_TIMEOUT 
                     });
 
+                    // Scroll to load all results
+                    await page.evaluate(() => {
+                        window.scrollTo(0, document.body.scrollHeight);
+                    });
+                    
+                    // Wait a bit for lazy-loaded content
+                    await page.waitForTimeout(2000);
+
                     // Extract business listings
                     const businesses = await page.$$eval(
                         CONSTANTS.YELP_SELECTORS.BUSINESS_CARD,
-                        (cards, selectors) => {
+                        (cards) => {
                             return cards.map(card => {
                                 const nameEl = card.querySelector('h3 a[href^="/biz/"], a[href^="/biz/"] h3');
                                 if (!nameEl) return null;
                                 
-                                const href = nameEl.closest('a')?.href || nameEl.querySelector('a')?.href;
+                                const linkEl = nameEl.closest('a') || nameEl.querySelector('a');
+                                const href = linkEl?.href;
                                 if (!href) return null;
 
                                 return {
@@ -65,15 +74,16 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                                     url: href,
                                 };
                             }).filter(Boolean);
-                        },
-                        CONSTANTS.YELP_SELECTORS
+                        }
                     );
+
+                    log.info(`Found ${businesses.length} businesses on this page`);
 
                     // Queue business detail pages
                     for (const business of businesses) {
                         if (businessCount >= maxResults) {
                             log.info(`Reached max results limit: ${maxResults}`);
-                            return;
+                            break;
                         }
 
                         await crawler.addRequests([{
@@ -86,19 +96,23 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
 
                     // Check for next page and queue it if we haven't reached max results
                     if (businessCount < maxResults) {
-                        const nextPageLink = await page.$eval(
-                            CONSTANTS.YELP_SELECTORS.NEXT_PAGE,
-                            el => el?.href
-                        ).catch(() => null);
+                        try {
+                            const nextPageLink = await page.$eval(
+                                CONSTANTS.YELP_SELECTORS.NEXT_PAGE,
+                                el => el?.href
+                            );
 
-                        if (nextPageLink) {
-                            log.info('Found next page, queueing...');
-                            await crawler.addRequests([{
-                                url: nextPageLink,
-                                userData: { type: 'search' },
-                            }]);
-                        } else {
-                            log.info('No more pages found');
+                            if (nextPageLink) {
+                                log.info('Found next page, queueing...');
+                                await crawler.addRequests([{
+                                    url: nextPageLink,
+                                    userData: { type: 'search' },
+                                }]);
+                            } else {
+                                log.info('No more pages found');
+                            }
+                        } catch (e) {
+                            log.info('No next page found');
                         }
                     }
 
@@ -115,6 +129,11 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         businessData.yelpUrl = url;
                         businessData.scrapedAt = new Date().toISOString();
                         
+                        // Initialize empty arrays for enrichment phase
+                        businessData.emails = [];
+                        businessData.phonesFromWebsite = [];
+                        businessData.socialLinks = [];
+                        
                         // Save to dataset
                         await dataset.pushData(businessData);
                         log.info(`Saved business: ${businessData.name}`);
@@ -128,7 +147,7 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                     await saveScreenshot(page, `error-${Date.now()}.png`);
                 }
                 
-                throw error;
+                // Don't throw - continue with other requests
             }
         },
 
@@ -136,4 +155,6 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
             log.error(`Request ${request.url} failed after ${request.retryCount} retries: ${error.message}`);
         },
     });
+
+    return crawler;
 }
