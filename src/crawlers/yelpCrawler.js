@@ -9,7 +9,7 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
     let businessCount = 0;
     const maxResults = input.maxResults || 50;
 
-    // Build crawler options conditionally
+    // Build base crawler options
     const crawlerOptions = {
         maxConcurrency: input.maxConcurrency || 3,
         maxRequestRetries: CONSTANTS.MAX_RETRIES,
@@ -18,7 +18,7 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
         launchContext: {
             launchOptions: {
                 headless: true,
-                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+                args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
             },
         },
 
@@ -156,8 +156,8 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
         },
     };
 
-    // Only add proxyConfiguration if it exists
-    if (proxyConfiguration) {
+    // Only add proxyConfiguration if it exists and is not null/undefined
+    if (proxyConfiguration !== null && proxyConfiguration !== undefined) {
         crawlerOptions.proxyConfiguration = proxyConfiguration;
     }
 

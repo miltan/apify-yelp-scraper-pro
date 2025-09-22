@@ -21,7 +21,7 @@ try {
     log.info(`Starting crawl from: ${searchUrl}`);
 
     // Create proxy configuration if enabled
-    let proxyConfiguration = null;
+    let proxyConfiguration;
     
     // Only create proxy configuration if user explicitly wants to use proxy
     if (validatedInput.useProxy === true) {
@@ -43,19 +43,28 @@ try {
             log.info('Proxy configuration created successfully');
         } catch (error) {
             log.warning(`Failed to create proxy configuration: ${error.message}. Continuing without proxy.`);
-            proxyConfiguration = null;
+            proxyConfiguration = undefined;
         }
     } else {
         log.info('Running without proxy configuration');
+        proxyConfiguration = undefined;
     }
 
     // Phase 1: Crawl Yelp
     log.info('Phase 1: Starting Yelp crawl...');
-    const yelpCrawler = await createYelpCrawler({
+    
+    // Build crawler params conditionally
+    const crawlerParams = {
         input: validatedInput,
-        proxyConfiguration,
         startUrl: searchUrl,
-    });
+    };
+    
+    // Only add proxyConfiguration if it's defined
+    if (proxyConfiguration) {
+        crawlerParams.proxyConfiguration = proxyConfiguration;
+    }
+    
+    const yelpCrawler = await createYelpCrawler(crawlerParams);
 
     // Add the initial request
     await yelpCrawler.run([searchUrl]);
@@ -72,11 +81,16 @@ try {
         if (businessesWithWebsites.length > 0) {
             log.info(`Found ${businessesWithWebsites.length} businesses with websites to enrich`);
             
-            await createWebsiteEnricher({
+            const enricherParams = {
                 input: validatedInput,
-                proxyConfiguration,
                 businesses: businessesWithWebsites,
-            });
+            };
+            
+            if (proxyConfiguration) {
+                enricherParams.proxyConfiguration = proxyConfiguration;
+            }
+            
+            await createWebsiteEnricher(enricherParams);
         } else {
             log.warning('No businesses with websites found for enrichment');
         }

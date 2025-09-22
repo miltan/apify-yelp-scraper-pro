@@ -4,14 +4,16 @@ import { Actor } from 'apify';
 import { extractContactInfo } from '../extractors/contactExtractor.js';
 import { CONSTANTS } from '../constants.js';
 
-export async function createWebsiteEnricher({ input, proxyConfiguration, businesses }) {
+export async function createWebsiteEnricher(params) {
+    const { input, businesses, proxyConfiguration } = params;
+    
     // Store enriched data
     const enrichedData = new Map();
     businesses.forEach(b => enrichedData.set(b.yelpUrl, { ...b }));
 
-    // Build crawler options conditionally
+    // Build base crawler options
     const crawlerOptions = {
-        maxConcurrency: Math.min(input.maxConcurrency || 3, 5), // Limit concurrency for website enrichment
+        maxConcurrency: Math.min(input.maxConcurrency || 3, 5),
         maxRequestRetries: 2,
         requestTimeoutSecs: CONSTANTS.REQUEST_TIMEOUT / 1000,
 
@@ -64,11 +66,10 @@ export async function createWebsiteEnricher({ input, proxyConfiguration, busines
                                     log.debug(`Added contact page: ${contactUrl}`);
                                 }
                             } catch (error) {
-                                // Path doesn't exist, skip it
                                 log.debug(`Contact page not found: ${contactUrl}`);
                             }
                         } else {
-                            // Without proxy, just add the request and let it fail if needed
+                            // Without proxy, just add the request
                             await crawler.addRequests([{
                                 url: contactUrl,
                                 userData: { 
@@ -87,12 +88,11 @@ export async function createWebsiteEnricher({ input, proxyConfiguration, busines
 
         failedRequestHandler: async ({ request, error }) => {
             log.warning(`Failed to enrich ${request.url}: ${error.message}`);
-            // Don't throw - we want to continue with other businesses
         },
     };
 
-    // Only add proxyConfiguration if it exists
-    if (proxyConfiguration) {
+    // Only add proxyConfiguration if it exists and is not null/undefined
+    if (proxyConfiguration !== null && proxyConfiguration !== undefined) {
         crawlerOptions.proxyConfiguration = proxyConfiguration;
     }
 
@@ -112,16 +112,11 @@ export async function createWebsiteEnricher({ input, proxyConfiguration, busines
     // After crawler finishes, save enriched data back to dataset
     log.info('Saving enriched data to dataset...');
     
-    // Clear the existing dataset and push enriched data
-    const dataset = await Actor.openDataset();
-    
     // Get all enriched businesses
     const finalData = Array.from(enrichedData.values());
     
-    // Clear existing items
-    const currentData = await dataset.getData();
-    
-    // Drop the current dataset
+    // Clear existing dataset and push enriched data
+    const dataset = await Actor.openDataset();
     await dataset.drop();
     
     // Open a new dataset and push enriched data
