@@ -9,6 +9,9 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
     let businessCount = 0;
     const maxResults = input.maxResults || 50;
 
+    // Select a random user agent
+    const userAgent = CONSTANTS.USER_AGENTS[Math.floor(Math.random() * CONSTANTS.USER_AGENTS.length)];
+
     // Build base crawler options
     const crawlerOptions = {
         maxConcurrency: input.maxConcurrency || 3,
@@ -20,21 +23,36 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                 headless: true,
                 args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
             },
+            // Set user agent at browser context level
+            userAgent: userAgent,
+        },
+
+        browserPoolOptions: {
+            useFingerprints: false, // Disable fingerprinting if not needed
         },
 
         preNavigationHooks: [
-            async ({ page }) => {
-                // Set user agent for stealth
-                const userAgent = CONSTANTS.USER_AGENTS[Math.floor(Math.random() * CONSTANTS.USER_AGENTS.length)];
-                await page.setUserAgent(userAgent);
-                
+            async ({ page, request }) => {
                 // Set viewport
                 await page.setViewportSize({ width: 1920, height: 1080 });
                 
                 // Add stealth settings
-                await page.evaluateOnNewDocument(() => {
-                    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+                await page.addInitScript(() => {
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => false,
+                    });
+                    
+                    // Additional stealth
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: () => [1, 2, 3, 4, 5],
+                    });
+                    
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['en-US', 'en'],
+                    });
                 });
+                
+                log.debug(`Navigating to ${request.url}`);
             },
         ],
 
@@ -45,39 +63,92 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
             try {
                 if (!userData.type || userData.type === 'search') {
                     // Handle search results page
-                    await page.waitForSelector(CONSTANTS.YELP_SELECTORS.BUSINESS_CARD, { 
-                        timeout: CONSTANTS.DEFAULT_TIMEOUT 
-                    });
+                    log.debug('Waiting for business cards to load...');
+                    
+                    // Try multiple selectors as Yelp might have different layouts
+                    const selectors = [
+                        '[data-testid*="serp-ia-card"]',
+                        'div[class*="container__"] > div[class*="businessName"]',
+                        'div[class*="hoverable"]',
+                        'ul li div[class*="container"]',
+                        'div[class*="searchResult"]',
+                    ];
+                    
+                    let businessCardsSelector = null;
+                    for (const selector of selectors) {
+                        try {
+                            await page.waitForSelector(selector, { timeout: 5000 });
+                            businessCardsSelector = selector;
+                            log.debug(`Found business cards with selector: ${selector}`);
+                            break;
+                        } catch (e) {
+                            continue;
+                        }
+                    }
+                    
+                    if (!businessCardsSelector) {
+                        log.error('Could not find business cards on page');
+                        await saveScreenshot(page, `no-cards-${Date.now()}.png`);
+                        return;
+                    }
 
                     // Scroll to load all results
                     await page.evaluate(() => {
                         window.scrollTo(0, document.body.scrollHeight);
                     });
                     
-                    // Wait a bit for lazy-loaded content
+                    // Wait for potential lazy-loaded content
                     await page.waitForTimeout(2000);
 
-                    // Extract business listings
-                    const businesses = await page.$$eval(
-                        CONSTANTS.YELP_SELECTORS.BUSINESS_CARD,
-                        (cards) => {
-                            return cards.map(card => {
-                                const nameEl = card.querySelector('h3 a[href^="/biz/"], a[href^="/biz/"] h3');
-                                if (!nameEl) return null;
-                                
-                                const linkEl = nameEl.closest('a') || nameEl.querySelector('a');
-                                const href = linkEl?.href;
-                                if (!href) return null;
-
-                                return {
-                                    name: nameEl.textContent?.trim(),
-                                    url: href,
-                                };
-                            }).filter(Boolean);
+                    // Extract business listings with multiple selector strategies
+                    const businesses = await page.evaluate(() => {
+                        const results = [];
+                        
+                        // Try different link selectors
+                        const linkSelectors = [
+                            'h3 a[href^="/biz/"]',
+                            'a[href^="/biz/"] h3',
+                            'a[href*="/biz/"]',
+                            '[data-testid*="serp-ia-card"] a',
+                        ];
+                        
+                        for (const selector of linkSelectors) {
+                            const links = document.querySelectorAll(selector);
+                            if (links.length > 0) {
+                                links.forEach(link => {
+                                    const href = link.href || link.closest('a')?.href;
+                                    const name = link.textContent || link.querySelector('h3')?.textContent || 
+                                               link.closest('[data-testid*="serp-ia-card"]')?.querySelector('h3')?.textContent;
+                                    
+                                    if (href && href.includes('/biz/') && name) {
+                                        results.push({
+                                            url: href,
+                                            name: name.trim(),
+                                        });
+                                    }
+                                });
+                                break;
+                            }
                         }
-                    );
+                        
+                        // Deduplicate
+                        const unique = [];
+                        const seen = new Set();
+                        for (const item of results) {
+                            if (!seen.has(item.url)) {
+                                seen.add(item.url);
+                                unique.push(item);
+                            }
+                        }
+                        
+                        return unique;
+                    });
 
                     log.info(`Found ${businesses.length} businesses on this page`);
+                    
+                    if (businesses.length === 0 && input.debugScreenshots) {
+                        await saveScreenshot(page, `no-businesses-${Date.now()}.png`);
+                    }
 
                     // Queue business detail pages
                     for (const business of businesses) {
@@ -94,33 +165,49 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         businessCount++;
                     }
 
-                    // Check for next page and queue it if we haven't reached max results
+                    // Check for next page if we haven't reached max results
                     if (businessCount < maxResults) {
-                        try {
-                            const nextPageLink = await page.$eval(
-                                CONSTANTS.YELP_SELECTORS.NEXT_PAGE,
-                                el => el?.href
-                            );
-
-                            if (nextPageLink) {
-                                log.info('Found next page, queueing...');
-                                await crawler.addRequests([{
-                                    url: nextPageLink,
-                                    userData: { type: 'search' },
-                                }]);
-                            } else {
-                                log.info('No more pages found');
+                        // Try multiple next button selectors
+                        const nextSelectors = [
+                            'a[aria-label="Next"]',
+                            'a.next-link',
+                            'a:has-text("Next")',
+                            '[class*="pagination"] a:has-text("Next")',
+                            'a[class*="next"]',
+                        ];
+                        
+                        let nextPageLink = null;
+                        for (const selector of nextSelectors) {
+                            try {
+                                nextPageLink = await page.$eval(selector, el => el?.href);
+                                if (nextPageLink) break;
+                            } catch (e) {
+                                continue;
                             }
-                        } catch (e) {
-                            log.info('No next page found');
+                        }
+
+                        if (nextPageLink) {
+                            log.info('Found next page, queueing...');
+                            await crawler.addRequests([{
+                                url: nextPageLink,
+                                userData: { type: 'search' },
+                            }]);
+                        } else {
+                            log.info('No more pages found');
                         }
                     }
 
                 } else if (userData.type === 'detail') {
                     // Handle business detail page
-                    await page.waitForSelector(CONSTANTS.YELP_SELECTORS.DETAIL_NAME, {
-                        timeout: CONSTANTS.DEFAULT_TIMEOUT
-                    });
+                    log.debug('Processing business detail page...');
+                    
+                    // Wait for main content
+                    try {
+                        await page.waitForSelector('h1', { timeout: CONSTANTS.DEFAULT_TIMEOUT });
+                    } catch (e) {
+                        log.error('Could not find business name on detail page');
+                        return;
+                    }
 
                     // Extract business details
                     const businessData = await extractBusinessDetails(page);
@@ -137,6 +224,8 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
                         // Save to dataset
                         await dataset.pushData(businessData);
                         log.info(`Saved business: ${businessData.name}`);
+                    } else {
+                        log.warning(`Could not extract data from ${url}`);
                     }
                 }
 
@@ -151,12 +240,12 @@ export async function createYelpCrawler({ input, proxyConfiguration, startUrl })
             }
         },
 
-        failedRequestHandler: async ({ request, error }) => {
+        failedRequestHandler: async ({ request }, error) => {
             log.error(`Request ${request.url} failed after ${request.retryCount} retries: ${error.message}`);
         },
     };
 
-    // Only add proxyConfiguration if it exists and is not null/undefined
+    // Only add proxyConfiguration if it exists
     if (proxyConfiguration !== null && proxyConfiguration !== undefined) {
         crawlerOptions.proxyConfiguration = proxyConfiguration;
     }

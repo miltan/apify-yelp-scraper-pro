@@ -1,24 +1,24 @@
 export const CONSTANTS = {
     // Yelp specific selectors - Updated for current Yelp structure
     YELP_SELECTORS: {
-        // Search page selectors
-        BUSINESS_CARD: '[data-testid*="serp-ia-card"], div[class*="container__"] > div[class*="businessName__"]',
-        BUSINESS_NAME: 'h3 a, a h3, div[class*="businessName"] a',
+        // Search page selectors - more specific
+        BUSINESS_CARD: '[data-testid*="serp-ia-card"], div[class*="hoverable"], div[class*="searchResult"]',
+        BUSINESS_NAME: 'h3 a[href^="/biz/"], a[href^="/biz/"] h3',
         RATING: '[aria-label*="star rating"], div[aria-label*="rating"]',
         REVIEW_COUNT: 'span:has-text("review"), span:contains("review")',
-        PRICE_LEVEL: 'span[class*="priceRange"], span:contains("$")',
+        PRICE_LEVEL: 'span[class*="priceRange"], span[aria-label*="Price range"]',
         CATEGORIES: 'span[class*="businessCategories"] a, a[class*="category"]',
-        NEXT_PAGE: 'a[aria-label="Next"], a[class*="next-link"], a:contains("Next")',
+        NEXT_PAGE: 'a[aria-label="Next"], a.next-link, [class*="pagination"] a:has-text("Next")',
         
-        // Business detail page selectors
-        DETAIL_NAME: 'h1[class*="heading"], h1',
-        DETAIL_RATING: 'div[aria-label*="star rating"], span[aria-label*="rating"]',
-        DETAIL_REVIEWS: 'a[href*="#reviews"], span:contains("review")',
-        DETAIL_PRICE: 'span[aria-label*="Price range"], span:contains("$")',
-        DETAIL_CATEGORIES: 'span[class*="category"] a, a[class*="category"]',
-        DETAIL_PHONE: 'a[href^="tel:"], p:contains("(")',
-        DETAIL_ADDRESS: 'address, div[class*="address"]',
-        DETAIL_WEBSITE: 'a:contains("Business website"), a[href*="biz_redir"], a:contains("Website")',
+        // Business detail page selectors - simplified
+        DETAIL_NAME: 'h1',
+        DETAIL_RATING: '[aria-label*="star rating"], [class*="rating"]',
+        DETAIL_REVIEWS: 'a[href*="#reviews"] span, span[class*="reviewCount"]',
+        DETAIL_PRICE: 'span[aria-label*="Price range"], span[class*="priceRange"]',
+        DETAIL_CATEGORIES: '[class*="categories"] a, span[class*="category"] a',
+        DETAIL_PHONE: 'a[href^="tel:"], [class*="phone"]',
+        DETAIL_ADDRESS: 'address, [class*="address"], p[class*="raw__"]',
+        DETAIL_WEBSITE: 'a[href*="biz_redir"], p:has-text("Business website") + p a, a:has-text("Website")',
     },
 
     // Regex patterns for contact extraction
